@@ -23,15 +23,16 @@ Allow a cross-origin iframe to survive a same-origin top-level navigation when b
 
 When the top-level frame navigates from page A to page B (same-origin), the browser will preserve the iframe, and reattach it an `HTMLIframeElement` on the navigated-to document that has the same `src` value and the same `id`.
 
+For UX reasons, the iframe would need to be matched and reattached before the new document's first render. If for some reason developers would need to add that iframe using script or at the bottom of their HTML, they'd be able to delay the first render using [`<link rel=expect>`](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/rel#expect).
+
 For security reasons, persistent iframes will be limited to same-origin navigations.
 
 ## FAQs
 
 ### What happens if the navigated-to page has no matching iframe?
 
-If by DOMContentLoaded time the iframe finds no match, it'd get killed at that point.
-Up until that point it'd remain alive and would be able to e.g. play audio or fetch content.
-The case where there isn't a match could result in a slightly confusing experience to users, but ideally that would be an exception.
+If by first render the iframe finds no match, it'd get killed at that point.
+Up until that point it'll remain alive and would be able to e.g. play audio or fetch content.
 
 ### What happens when the navigation is to a cross-origin document?
 In that case, the iframe would be killed immediately, similar to when it'd be killed today.
