@@ -15,15 +15,26 @@ Allow a cross-origin iframe to survive a same-origin top-level navigation when b
 
 ``` html
 <!-- Page A (before navigation) -->
-<iframe src="https://chat.example.com" persist id="sidebar-chat"></iframe>
+<iframe src="https://chat.example.com" id="sidebar-chat" persist></iframe>
 
 <!-- Page B (after navigation to same-origin URL) -->
-<iframe src="https://chat.example.com" persist id="sidebar-chat"></iframe>
+<iframe src="https://chat.example.com" id="sidebar-chat" persist></iframe>
 ```
 
 When the top-level frame navigates from page A to page B (same-origin), the browser will preserve the iframe, and reattach it an `HTMLIframeElement` on the navigated-to document that has the same `src` value and the same `id`.
 
 For security reasons, persistent iframes will be limited to same-origin navigations.
+
+## FAQs
+
+### What happens if the navigated-to page has no matching iframe?
+
+If by DOMContentLoaded time the iframe finds no match, it'd get killed at that point.
+Up until that point it'd remain alive and would be able to e.g. play audio or fetch content.
+The case where there isn't a match could result in a slightly confusing experience to users, but ideally that would be an exception.
+
+### What happens when the navigation is to a cross-origin document?
+In that case, the iframe would be killed immediately, similar to when it'd be killed today.
 
 ## Open questions
 * Would limiting this to cross-origin or process-isolated iframes help simplify the spec/implementation?
