@@ -150,7 +150,7 @@ For an existing persistent widget to survive a top-level navigation, all of the 
 1. **Same-Origin Navigation**: The navigation must be to a same-origin document.
 2. **Matching Key (`src` + `id`)**: The destination document must include a `<persistentwidget>` element whose resolved `src` URL and `id` attribute match the existing widget.
 3. **Permissions Policy Compatibility**: The destination document must have a matching Permissions Policy with the document that originally created the widget. If the new document specifies a stricter or different policy (e.g. disabling geolocation), the widget is destroyed to prevent policy bypasses.
-4. **Attachment Before First Render**: The matching `<persistentwidget>` must be attached to the destination DOM before the new document's first render / paint.
+4. **Attachment Before First Render**: The matching `<persistentwidget>` must be attached to the destination DOM before the new document's first render, where the [pagereveal event is fired](https://html.spec.whatwg.org/multipage/browsing-the-web.html#reveal).
 
 ### Delayed First Render
 
