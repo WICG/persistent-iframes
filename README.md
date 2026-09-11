@@ -141,6 +141,13 @@ window.addEventListener('openerchange', () => {
 });
 ```
 
+### 4. Message Ordering, Time-of-Use (TOU), and Transferables
+
+Because the embedder page can navigate while messages are in flight across processes:
+- **Ordering with `openerchange`**: Incoming `postMessage` messages and `openerchange` notifications inside the persistent widget must be queued on the same task queue so that all messages sent by an old opener before navigation are delivered (or dropped) prior to the `openerchange` event firing.
+- **Time-of-Use (TOU) Protection**: Messages sent by the widget via `window.persistentWidgetOpener.postMessage()` are bound to the specific opener document active at the time of sending. If the opener document navigates before the message is delivered, the message is dropped rather than delivered to the new destination document.
+- **Transferable Objects (`MessagePort`, `SharedArrayBuffer`)**: Passing transferable handles such as `MessagePort` or shared memory across `postMessage` could allow persistent channels to bridge across separate navigations, bypass policies (such as `BroadcastChannel` restrictions), or keep Back-Forward Cache (BFCache) documents entangled with active widgets. To avoid these hazards, transferring `MessagePort`s and other transferable objects is disallowed (or ports are automatically disentangled/closed upon opener change). This could be revisited if use cases for transferables come up if we can find a way around these issues.
+
 ---
 
 ## Adoption and Lifetime Rules
@@ -151,6 +158,7 @@ For an existing persistent widget to survive a top-level navigation, all of the 
 2. **Matching Key (`src` + `id`)**: The destination document must include a `<persistentwidget>` element whose resolved `src` URL and `id` attribute match the existing widget.
 3. **Permissions Policy Compatibility**: The destination document must have a matching Permissions Policy with the document that originally created the widget. If the new document specifies a stricter or different policy (e.g. disabling geolocation), the widget is destroyed to prevent policy bypasses.
 4. **Attachment Before First Render**: The matching `<persistentwidget>` must be attached to the destination DOM before the new document's first render, where the [pagereveal event is fired](https://html.spec.whatwg.org/multipage/browsing-the-web.html#reveal).
+5. **Tab Scoping**: Persistent widgets are strictly scoped to the top-level browser tab in which they were created. A persistent widget cannot be shared with or adopted by a document in another tab or window.
 
 ### Delayed First Render
 
@@ -174,6 +182,7 @@ Rather than modifying `<iframe>`, Persistent Widgets define a distinct **browsin
 
 - **Isolated Browsing Context Group**: A persistent widget runs in an independent browsing context in a separate browsing context group, decoupled from the embedder's browsing context tree.
 - **No Dangling References**: Standard nested browsing contexts (`<iframe>`) expose synchronous DOM properties like `iframe.contentWindow`, `window.parent`, and `window.top`. If an iframe survived across navigations while its parent document was garbage collected, references across the boundary would create severe lifetime, memory, and security hazards.
+- **Exclusion from `window.frames`**: Like `<fencedframe>`, `<persistentwidget>` elements are not listed in the embedder document's `window.frames` collection (`window.length` / indexed frame access), preventing synchronous cross-tree frame enumeration.
 - **Clean BFCache Boundaries**: Isolating the widget into its own browsing context group allows the navigating page to enter BFCache cleanly without cross-page script references.
 
 ### Supporting Third-Party / Cross-Origin Services
@@ -234,6 +243,9 @@ companionWindows.open('/player.html', { name: 'player' }).then(playerWindow => {
 
 ## Future Work & Open Questions
 
+- **Transferable Objects (`MessagePort`, `SharedArrayBuffer`) & BFCache / BroadcastChannel Policies**: Should `postMessage` on `<persistentwidget>` and `window.persistentWidgetOpener` allow transferring `MessagePort`s and shared memory (`SharedArrayBuffer`)? Allowing open `MessagePort`s across navigation boundaries could circumvent `BroadcastChannel` policies or prevent previous embedder documents from cleanly entering BFCache.
+- **Prerendering (Speculation Rules) Interactions**: How should `<persistentwidget>` behave when a destination page is prerendered in the background while the active page is still displaying the widget? Prerendered pages must not prematurely steal or detach the persistent widget from the currently active tab until prerender activation occurs.
+- **Browser Extension Integration (`chrome.webNavigation`, `chrome.tabs`, Content Scripts)**: How should persistent widgets be exposed to browser extensions?
 - **Same-Document DOM Reparenting ([WHATWG Issue #5484](https://github.com/whatwg/html/issues/5484))**: In standard HTML, moving an `<iframe>` to a different place in the DOM destroys and reloads the frame. Because `<persistentwidget>` contexts can exist temporarily detached from a DOM node, the same mechanism could be extended to allow seamless in-page reparenting without reloads.
 - **Directly Embedding Cross-Origin Widget Documents**: Currently, `<persistentwidget src="...">` requires its root document to be same-origin with the embedder (with third-party content nested inside a child `<iframe>`). Could persistent widgets be extended in the future to allow directly loading a cross-origin root document (e.g., `<persistentwidget src="https://third-party-service.example/widget.html">`) that persists across same-origin top-level navigations? This would require explicit mutual opt-in headers from both the embedder and the embedded origin, along with deeper exploration into cross-origin security policies, storage partitioning, and capability delegation.
 - **Media & Animation Continuity**: Could video playback continues uninterrupted? Could CSS/JS animations in the widget keep producing frames? The browser compositor would re-composit the live widget on top of the retained background textures during paint holding.
