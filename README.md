@@ -146,7 +146,7 @@ window.addEventListener('openerchange', () => {
 Because the embedder page can navigate while messages are in flight across processes:
 - **Ordering with `openerchange`**: Incoming `postMessage` messages and `openerchange` notifications inside the persistent widget must be queued on the same task queue so that all messages sent by an old opener before navigation are delivered (or dropped) prior to the `openerchange` event firing.
 - **Time-of-Use (TOU) Protection**: Messages sent by the widget via `window.persistentWidgetOpener.postMessage()` are bound to the specific opener document active at the time of sending. If the opener document navigates before the message is delivered, the message is dropped rather than delivered to the new destination document.
-- **Transferable Objects (`MessagePort`, `SharedArrayBuffer`)**: Passing transferable handles such as `MessagePort` or shared memory across `postMessage` could allow persistent channels to bridge across separate navigations, bypass policies (such as `BroadcastChannel` restrictions), or keep Back-Forward Cache (BFCache) documents entangled with active widgets. To avoid these hazards, transferring `MessagePort`s and other transferable objects is disallowed (or ports are automatically disentangled/closed upon opener change). This could be revisited if use cases for transferables come up if we can find a way around these issues.
+- **No Transferables or Shared Memory**: `postMessage` has no `transfer` option, and values such as `SharedArrayBuffer` can't be sent. See [What Crosses the Widget Boundary](#what-crosses-the-widget-boundary).
 
 ---
 
@@ -184,9 +184,20 @@ If a page dynamically creates or appends `<persistentwidget>` elements via JavaS
 Rather than modifying `<iframe>`, Persistent Widgets define a distinct **browsing context container** hosting an **isolated top-level browsing context**:
 
 - **Isolated Browsing Context Group**: A persistent widget runs in an independent browsing context in a separate browsing context group, decoupled from the embedder's browsing context tree.
-- **No Dangling References**: Standard nested browsing contexts (`<iframe>`) expose synchronous DOM properties like `iframe.contentWindow`, `window.parent`, and `window.top`. If an iframe survived across navigations while its parent document was garbage collected, references across the boundary would create severe lifetime, memory, and security hazards.
+- **No Dangling References**: Standard nested browsing contexts (`<iframe>`) expose synchronous DOM properties like `iframe.contentWindow`, `window.parent`, and `window.top`. These can't be kept working across navigations (see [What Crosses the Widget Boundary](#what-crosses-the-widget-boundary)).
 - **Exclusion from `window.frames`**: Like `<fencedframe>`, `<persistentwidget>` elements are not listed in the embedder document's `window.frames` collection (`window.length` / indexed frame access), preventing synchronous cross-tree frame enumeration.
 - **Clean BFCache Boundaries**: Isolating the widget into its own browsing context group allows the navigating page to enter BFCache cleanly without cross-page script references.
+
+### What Crosses the Widget Boundary
+
+A persistent widget is attached to a series of embedders over its lifetime. Object references and shared memory (`SharedArrayBuffer`, shared `WebAssembly.Memory`) only work within one [agent cluster](https://html.spec.whatwg.org/multipage/webappapis.html#integration-with-the-javascript-agent-cluster-formalism), which in practice means one heap and one process. Successive embedders often aren't in the same agent cluster: so that the previous page can enter BFCache, browsers may put the next page in a new browsing context group, even for same-origin navigations. So the widget gets its own browsing context group, and shares an agent cluster with none of its embedders. Otherwise, references held by the widget would keep previous embedders alive, let script run in them after they were destroyed or while they were frozen in BFCache, and break whenever the next embedder was in a different process.
+
+As a result:
+- There's no `WindowProxy` between the widget and its embedders (no `contentWindow`, `parent`, `top`, or `opener`).
+- `postMessage` only structured-clones messages. Per [safe passing of structured data](https://html.spec.whatwg.org/multipage/structured-data.html#safe-passing-of-structured-data), values bound to an agent cluster, such as `SharedArrayBuffer`, throw a `DataCloneError`.
+- `postMessage` has no `transfer` list, so the opener channel only ever reaches the current embedder. A transferred `MessagePort` would keep working after `openerchange`.
+
+**Non-goal:** The widget shares its embedder's storage partition, so it can still talk to previous embedders and other same-origin documents through `BroadcastChannel`, `SharedWorker`, or `ServiceWorker`, and the workers can relay `MessagePort`s. Two same-origin tabs can already do this. It's safe because these channels only pass messages, a port doesn't keep the document on the other end alive, and documents in BFCache queue messages or are evicted, as they are today. Preventing it would require a separate storage partition, which would defeat the use cases, such as a support assistant that shares the site's login cookies and storage.
 
 ### Supporting Third-Party / Cross-Origin Services
 
@@ -240,13 +251,13 @@ companionWindows.open('/player.html', { name: 'player' }).then(playerWindow => {
 ### 2. Adding a `persist` attribute to `<iframe>`
 
 **Why this was not chosen**:
-- Iframes expose synchronous `window.parent`, `window.top`, and `iframe.contentWindow` properties. Maintaining live pointers across top-level navigations while the old document is destroyed or placed in BFCache creates severe memory safety, lifetime, and security hazards. We could try making `<iframe persist>` be the same as a persistent widget under the hood by removing all of the things we don't want from iframes when this attribute is set, which would make progressive enhancement better but would also confuse people who think its more like an iframe than it actually is.
+- Iframes expose synchronous `window.parent`, `window.top`, and `iframe.contentWindow` properties, which can't be kept working across top-level navigations while the old document is destroyed or placed in BFCache (see [What Crosses the Widget Boundary](#what-crosses-the-widget-boundary)). We could try making `<iframe persist>` be the same as a persistent widget under the hood by removing all of the things we don't want from iframes when this attribute is set, which would make progressive enhancement better but would also confuse people who think its more like an iframe than it actually is.
 
 ---
 
 ## Future Work & Open Questions
 
-- **Transferable Objects (`MessagePort`, `SharedArrayBuffer`) & BFCache / BroadcastChannel Policies**: Should `postMessage` on `<persistentwidget>` and `window.persistentWidgetOpener` allow transferring `MessagePort`s and shared memory (`SharedArrayBuffer`)? Allowing open `MessagePort`s across navigation boundaries could circumvent `BroadcastChannel` policies or prevent previous embedder documents from cleanly entering BFCache.
+- **Transferring `MessagePort`s**: Should the opener channel accept a `transfer` list, perhaps closing transferred ports on `openerchange`? Shared memory will stay disallowed.
 - **Prerendering (Speculation Rules) Interactions**: How should `<persistentwidget>` behave when a destination page is prerendered in the background while the active page is still displaying the widget? Prerendered pages must not prematurely steal or detach the persistent widget from the currently active tab until prerender activation occurs.
 - **Browser Extension Integration (`chrome.webNavigation`, `chrome.tabs`, Content Scripts)**: How should persistent widgets be exposed to browser extensions?
 - **Same-Document DOM Reparenting ([WHATWG Issue #5484](https://github.com/whatwg/html/issues/5484))**: In standard HTML, moving an `<iframe>` to a different place in the DOM destroys and reloads the frame. Because `<persistentwidget>` contexts can exist temporarily detached from a DOM node, the same mechanism could be extended to allow seamless in-page reparenting without reloads.
